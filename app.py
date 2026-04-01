@@ -17,7 +17,7 @@ client = gspread.authorize(creds)
 sheet = client.open("CrewData").sheet1
 
 # ---------- UI ----------
-st.title("🚆 Crew Night Duty System")
+st.title("🚆 Crew Night Duty System (Final)")
 
 uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx"])
 
@@ -91,11 +91,12 @@ if uploaded_file:
 
         duty_df = pd.DataFrame(records)
 
-        # ---------- NIGHT CHECK ----------
+        # ---------- NIGHT LOGIC (FIXED 00:00–05:59) ----------
         def is_night(sign_on, sign_off):
-            if sign_off.date() > sign_on.date():
-                return True
-            return not (sign_on.hour > 5 and sign_off.hour > 5)
+            night_start = sign_on.replace(hour=0, minute=0, second=0)
+            night_end = sign_on.replace(hour=5, minute=59, second=59)
+
+            return sign_on <= night_end and sign_off >= night_start
 
         duty_df['Night'] = duty_df.apply(
             lambda x: is_night(x['SignOn'], x['SignOff']), axis=1
@@ -148,7 +149,7 @@ if uploaded_file:
 
         final_df = pd.DataFrame(final_rows)
 
-        # ---------- CONTINUITY FILTER (NEW) ----------
+        # ---------- CONTINUITY FILTER ----------
         valid_crews = []
 
         for crew_id, group in duty_df.groupby('Crew Id'):
