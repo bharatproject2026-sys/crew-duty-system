@@ -24,20 +24,23 @@ uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx"])
 # ---------- PROCESS ----------
 if uploaded_file:
     try:
-        # ✅ Load Excel
+        # Load Excel
         df = pd.read_excel(uploaded_file)
 
         # Clean column names
         df.columns = df.columns.str.strip()
 
-        # ✅ Select correct columns (B, C, E, H)
+        # Select columns (B, C, E, H)
         df = df.iloc[:, [1, 2, 4, 7]]
 
         # Rename columns
         df.columns = ['Crew Id', 'Crew Name', 'Action', 'DateTime']
 
-        # Convert datetime
-        df['DateTime'] = pd.to_datetime(df['DateTime'], dayfirst=True)
+        # ✅ Safe DateTime conversion (FIXED)
+        df['DateTime'] = pd.to_datetime(df['DateTime'], dayfirst=True, errors='coerce')
+
+        # Remove invalid rows
+        df = df.dropna(subset=['DateTime'])
 
         # Remove duplicates
         df = df.drop_duplicates()
