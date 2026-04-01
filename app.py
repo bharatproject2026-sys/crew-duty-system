@@ -148,6 +148,19 @@ if uploaded_file:
 
         final_df = pd.DataFrame(final_rows)
 
+        # ---------- CONTINUITY FILTER (NEW) ----------
+        valid_crews = []
+
+        for crew_id, group in duty_df.groupby('Crew Id'):
+            group = group.sort_values('SignOn').reset_index(drop=True)
+
+            for i in range(len(group) - 1):
+                if group.loc[i, 'Night'] == True:
+                    if group.loc[i+1, 'Night'] == True:
+                        valid_crews.append(group.loc[i, 'Crew Id'])
+
+        final_df = final_df[final_df['Crew Id'].isin(valid_crews)]
+
         # ---------- REPORT ----------
         if not final_df.empty:
             pivot_df = final_df.pivot_table(
@@ -169,7 +182,7 @@ if uploaded_file:
             )
 
         else:
-            st.warning("⚠️ No 3–6 day streak found")
+            st.warning("⚠️ No valid continuous streak found")
 
         st.success("🎯 Processing Complete")
 
