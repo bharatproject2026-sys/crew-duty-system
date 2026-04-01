@@ -101,7 +101,17 @@ if uploaded_file:
             lambda x: is_night(x['SignOn'], x['SignOff']), axis=1
         )
 
-        duty_df['Date'] = duty_df['SignOn'].dt.date
+        # ---------- CORRECT NIGHT DATE ----------
+        def get_night_date(sign_on, sign_off):
+            if sign_off.date() > sign_on.date():
+                return sign_off.date()
+            else:
+                return sign_on.date()
+
+        duty_df['Date'] = duty_df.apply(
+            lambda x: get_night_date(x['SignOn'], x['SignOff']),
+            axis=1
+        )
 
         # ---------- STREAK + VALIDATION ----------
         final_rows = []
@@ -125,12 +135,10 @@ if uploaded_file:
                             streak.append(group.loc[i])
 
                         else:
-                            # CHECK STREAK
                             if len(streak) >= 3:
                                 last_date = streak[-1]['Date']
                                 next_duty = group[group['Date'] > last_date]
 
-                                # ✅ NEW RULE
                                 if next_duty.empty or next_duty.iloc[0]['Night']:
                                     for idx, row in enumerate(streak):
                                         day_num = idx + 1
