@@ -1,167 +1,50 @@
-import streamlit as st
-import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+# ---------- LOAD EXCEL ----------
+new_df = pd.read_excel(uploaded_file)
 
-# ---------- GOOGLE SHEETS CONNECT ----------
-scope = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
-]
+new_df.columns = new_df.columns.str.strip()
+new_df = new_df.iloc[:, [1, 2, 4, 7]]
+new_df.columns = ['Crew Id', 'Crew Name', 'Action', 'DateTime']
 
-creds = ServiceAccountCredentials.from_json_keyfile_dict(
-    st.secrets["GOOGLE_CREDENTIALS"], scope
-)
+new_df['DateTime'] = pd.to_datetime(new_df['DateTime'], dayfirst=True, errors='coerce')
+new_df = new_df.dropna(subset=['DateTime'])
 
-client = gspread.authorize(creds)
-sheet = client.open("CrewData").sheet1
+# ---------- LOAD OLD DATA FROM GOOGLE SHEET ----------
+try:
+    old_data = sheet.get_all_records()
+    old_df = pd.DataFrame(old_data)
 
-# ---------- UI ----------
-st.title("🚆 Crew Night Duty System")
+    if not old_df.empty:
+        old_df['DateTime'] = pd.to_datetime(old_df['DateTime'])
+    else:
+        old_df = pd.DataFrame(columns=new_df.columns)
 
-uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx"])
+except:
+    old_df = pd.DataFrame(columns=new_df.columns)
 
-# ---------- PROCESS ----------
-if uploaded_file:
-    try:
-        # Load Excel
-        df = pd.read_excel(uploaded_file)
+# ---------- MERGE OLD + NEW ----------
+df = pd.concat([old_df, new_df])
 
-        # Clean column names
-        df.columns = df.columns.str.strip()
+# Remove duplicates
+df = df.drop_duplicates()
 
-        # Select required columns (B, C, E, H)
-        df = df.iloc[:, [1, 2, 4, 7]]
+# ---------- KEEP LAST 20 DAYS ----------
+df['DateTime'] = pd.to_datetime(df['DateTime'])
 
-        # Rename columns
-        df.columns = ['Crew Id', 'Crew Name', 'Action', 'DateTime']
+last_date = df['DateTime'].max()
+df = df[df['DateTime'] >= last_date - pd.Timedelta(days=20)]
 
-        # Convert datetime safely
-        df['DateTime'] = pd.to_datetime(df['DateTime'], dayfirst=True, errors='coerce')
+# ---------- SAVE BACK TO GOOGLE SHEET ----------
+sheet.clear()
 
-        # Remove invalid rows
-        df = df.dropna(subset=['DateTime'])
+# Add header
+sheet.append_row(['Crew Id', 'Crew Name', 'Action', 'DateTime'])
 
-        # Remove duplicates
-        df = df.drop_duplicates()
+# Convert to string
+df['DateTime'] = df['DateTime'].astype(str)
 
-        st.subheader("📊 Data Preview")
-        st.dataframe(df.head())
+sheet.append_rows(df.values.tolist())
 
-        # ✅ Convert datetime to string (FIX for Google Sheets)
-        df['DateTime'] = df['DateTime'].astype(str)
+st.success("✅ Data Updated (Last 20 Days Stored)")
 
-        # Upload to Google Sheet
-        sheet.append_rows(df.values.tolist())
-        st.success("✅ Data Uploaded to Google Sheets")
-
-        # ---------- SIGNON-SIGNOFF PAIR ----------
-        df['DateTime'] = pd.to_datetime(df['DateTime'])
-        df = df.sort_values(['Crew Id', 'DateTime'])
-
-        records = []
-
-        for crew_id, group in df.groupby('Crew Id'):
-            sign_on = None
-            crew_name = None
-
-            for _, row in group.iterrows():
-                if row['Action'] == 'SIGNON':
-                    sign_on = row['DateTime']
-                    crew_name = row['Crew Name']
-
-                elif row['Action'] == 'SIGNOFF' and sign_on is not None:
-                    records.append({
-                        'Crew Id': row['Crew Id'],
-                        'Crew Name': crew_name,
-                        'SignOn': sign_on,
-                        'SignOff': row['DateTime']
-                    })
-                    sign_on = None
-
-        duty_df = pd.DataFrame(records)
-
-        # ---------- NIGHT DUTY CHECK ----------
-        def is_night(sign_on, sign_off):
-            if sign_off.date() > sign_on.date():
-                return True
-            return not (sign_on.hour > 5 and sign_off.hour > 5)
-
-        duty_df['Night'] = duty_df.apply(
-            lambda x: is_night(x['SignOn'], x['SignOff']), axis=1
-        )
-
-        night_df = duty_df[duty_df['Night'] == True].copy()
-        night_df['Date'] = night_df['SignOn'].dt.date
-
-        # ---------- STREAK LOGIC ----------
-        night_df = night_df.sort_values(['Crew Id', 'Date'])
-
-        final_rows = []
-
-        for crew_id, group in night_df.groupby('Crew Id'):
-            group = group.sort_values('Date')
-            streak = []
-
-            for i in range(len(group)):
-                if not streak:
-                    streak.append(group.iloc[i])
-                else:
-                    prev = streak[-1]['Date']
-                    curr = group.iloc[i]['Date']
-
-                    if (curr - prev).days == 1:
-                        streak.append(group.iloc[i])
-                    else:
-                        if len(streak) >= 3:
-                            for idx, row in enumerate(streak):
-                                day_num = idx + 1
-                                if 3 <= day_num <= 6:
-                                    final_rows.append({
-                                        'Crew Id': row['Crew Id'],
-                                        'Crew Name': row['Crew Name'],
-                                        'Day': f"{day_num}th day",
-                                        'Date': row['Date']
-                                    })
-                        streak = [group.iloc[i]]
-
-            if len(streak) >= 3:
-                for idx, row in enumerate(streak):
-                    day_num = idx + 1
-                    if 3 <= day_num <= 6:
-                        final_rows.append({
-                            'Crew Id': row['Crew Id'],
-                            'Crew Name': row['Crew Name'],
-                            'Day': f"{day_num}th day",
-                            'Date': row['Date']
-                        })
-
-        final_df = pd.DataFrame(final_rows)
-
-        # ---------- FINAL REPORT ----------
-        if not final_df.empty:
-            pivot_df = final_df.pivot_table(
-                index=['Crew Id', 'Crew Name'],
-                columns='Day',
-                values='Date',
-                aggfunc='first'
-            ).reset_index()
-
-            st.subheader("📊 Final Report (3–6 Day Streak)")
-            st.dataframe(pivot_df)
-
-            csv = pivot_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Download Report",
-                data=csv,
-                file_name="final_report.csv",
-                mime="text/csv"
-            )
-
-        else:
-            st.warning("⚠️ No 3–6 day streak found")
-
-        st.success("🎯 Processing Complete")
-
-    except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
+# ---------- CONTINUE PROCESS ----------
+df['DateTime'] = pd.to_datetime(df['DateTime'])
