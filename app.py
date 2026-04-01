@@ -91,76 +91,86 @@ if uploaded_file:
 
         duty_df = pd.DataFrame(records)
 
-        # ---------- NIGHT LOGIC (FIXED 00:00–05:59) ----------
+        # ---------- NIGHT LOGIC (00:00–05:59) ----------
         def is_night(sign_on, sign_off):
             night_start = sign_on.replace(hour=0, minute=0, second=0)
             night_end = sign_on.replace(hour=5, minute=59, second=59)
-
             return sign_on <= night_end and sign_off >= night_start
 
         duty_df['Night'] = duty_df.apply(
             lambda x: is_night(x['SignOn'], x['SignOff']), axis=1
         )
 
-        night_df = duty_df[duty_df['Night'] == True].copy()
-        night_df['Date'] = night_df['SignOn'].dt.date
+        duty_df['Date'] = duty_df['SignOn'].dt.date
 
-        # ---------- STREAK ----------
-        night_df = night_df.sort_values(['Crew Id', 'Date'])
-
+        # ---------- STREAK DETECTION ----------
         final_rows = []
-
-        for crew_id, group in night_df.groupby('Crew Id'):
-            group = group.sort_values('Date')
-            streak = []
-
-            for i in range(len(group)):
-                if not streak:
-                    streak.append(group.iloc[i])
-                else:
-                    prev = streak[-1]['Date']
-                    curr = group.iloc[i]['Date']
-
-                    if (curr - prev).days == 1:
-                        streak.append(group.iloc[i])
-                    else:
-                        if len(streak) >= 3:
-                            for idx, row in enumerate(streak):
-                                day_num = idx + 1
-                                if 3 <= day_num <= 6:
-                                    final_rows.append({
-                                        'Crew Id': row['Crew Id'],
-                                        'Crew Name': row['Crew Name'],
-                                        'Day': f"{day_num}th day",
-                                        'Date': row['Date']
-                                    })
-                        streak = [group.iloc[i]]
-
-            if len(streak) >= 3:
-                for idx, row in enumerate(streak):
-                    day_num = idx + 1
-                    if 3 <= day_num <= 6:
-                        final_rows.append({
-                            'Crew Id': row['Crew Id'],
-                            'Crew Name': row['Crew Name'],
-                            'Day': f"{day_num}th day",
-                            'Date': row['Date']
-                        })
-
-        final_df = pd.DataFrame(final_rows)
-
-        # ---------- CONTINUITY FILTER ----------
         valid_crews = []
 
         for crew_id, group in duty_df.groupby('Crew Id'):
-            group = group.sort_values('SignOn').reset_index(drop=True)
+            group = group.sort_values('Date').reset_index(drop=True)
 
-            for i in range(len(group) - 1):
+            streak = []
+
+            for i in range(len(group)):
                 if group.loc[i, 'Night'] == True:
-                    if group.loc[i+1, 'Night'] == True:
-                        valid_crews.append(group.loc[i, 'Crew Id'])
+                    if not streak:
+                        streak.append(group.loc[i])
+                    else:
+                        prev = streak[-1]['Date']
+                        curr = group.loc[i]['Date']
 
-        final_df = final_df[final_df['Crew Id'].isin(valid_crews)]
+                        if (curr - prev).days == 1:
+                            streak.append(group.loc[i])
+                        else:
+                            # CHECK STREAK
+                            if len(streak) >= 3:
+                                last_date = streak[-1]['Date']
+
+                                next_duty = group[group['Date'] > last_date]
+
+                                if not next_duty.empty:
+                                    next_row = next_duty.iloc[0]
+
+                                    # ✅ ONLY if next duty ALSO night
+                                    if next_row['Night'] == True:
+                                        valid_crews.append(crew_id)
+
+                                        for idx, row in enumerate(streak):
+                                            day_num = idx + 1
+                                            if 3 <= day_num <= 6:
+                                                final_rows.append({
+                                                    'Crew Id': row['Crew Id'],
+                                                    'Crew Name': row['Crew Name'],
+                                                    'Day': f"{day_num}th day",
+                                                    'Date': row['Date']
+                                                })
+
+                            streak = [group.loc[i]]
+                else:
+                    streak = []
+
+            # LAST STREAK CHECK
+            if len(streak) >= 3:
+                last_date = streak[-1]['Date']
+                next_duty = group[group['Date'] > last_date]
+
+                if not next_duty.empty:
+                    next_row = next_duty.iloc[0]
+                    if next_row['Night'] == True:
+                        valid_crews.append(crew_id)
+
+                        for idx, row in enumerate(streak):
+                            day_num = idx + 1
+                            if 3 <= day_num <= 6:
+                                final_rows.append({
+                                    'Crew Id': row['Crew Id'],
+                                    'Crew Name': row['Crew Name'],
+                                    'Day': f"{day_num}th day",
+                                    'Date': row['Date']
+                                })
+
+        final_df = pd.DataFrame(final_rows)
 
         # ---------- REPORT ----------
         if not final_df.empty:
