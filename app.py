@@ -30,13 +30,13 @@ if uploaded_file:
         # Clean column names
         df.columns = df.columns.str.strip()
 
-        # Select columns (B, C, E, H)
+        # Select required columns (B, C, E, H)
         df = df.iloc[:, [1, 2, 4, 7]]
 
         # Rename columns
         df.columns = ['Crew Id', 'Crew Name', 'Action', 'DateTime']
 
-        # ✅ Safe DateTime conversion (FIXED)
+        # Convert datetime safely
         df['DateTime'] = pd.to_datetime(df['DateTime'], dayfirst=True, errors='coerce')
 
         # Remove invalid rows
@@ -48,11 +48,15 @@ if uploaded_file:
         st.subheader("📊 Data Preview")
         st.dataframe(df.head())
 
+        # ✅ Convert datetime to string (FIX for Google Sheets)
+        df['DateTime'] = df['DateTime'].astype(str)
+
         # Upload to Google Sheet
         sheet.append_rows(df.values.tolist())
         st.success("✅ Data Uploaded to Google Sheets")
 
         # ---------- SIGNON-SIGNOFF PAIR ----------
+        df['DateTime'] = pd.to_datetime(df['DateTime'])
         df = df.sort_values(['Crew Id', 'DateTime'])
 
         records = []
@@ -77,7 +81,7 @@ if uploaded_file:
 
         duty_df = pd.DataFrame(records)
 
-        # ---------- NIGHT CHECK ----------
+        # ---------- NIGHT DUTY CHECK ----------
         def is_night(sign_on, sign_off):
             if sign_off.date() > sign_on.date():
                 return True
