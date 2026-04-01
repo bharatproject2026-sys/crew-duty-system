@@ -24,13 +24,25 @@ uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx"])
 # ---------- PROCESS ----------
 if uploaded_file:
     try:
-        df = pd.read_excel(uploaded_file, header=2)
+        # ✅ Load Excel
+        df = pd.read_excel(uploaded_file)
+
+        # Clean column names
+        df.columns = df.columns.str.strip()
+
+        # ✅ Select correct columns (B, C, E, H)
+        df = df.iloc[:, [1, 2, 4, 7]]
+
+        # Rename columns
+        df.columns = ['Crew Id', 'Crew Name', 'Action', 'DateTime']
+
+        # Convert datetime
         df['DateTime'] = pd.to_datetime(df['DateTime'], dayfirst=True)
 
         # Remove duplicates
         df = df.drop_duplicates()
 
-        st.subheader("📊 Uploaded Data Preview")
+        st.subheader("📊 Data Preview")
         st.dataframe(df.head())
 
         # Upload to Google Sheet
